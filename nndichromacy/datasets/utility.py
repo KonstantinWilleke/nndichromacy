@@ -254,7 +254,7 @@ def get_cached_loader(image_ids, responses, batch_size, shuffle=True, image_cach
     return dataloader
 
 
-def add_h5_to_preprocessed_table(path, keys, comments, ignore_all_behaviors=True):
+def add_h5_to_preprocessed_table(path, keys, comments, include_behavior=True):
     """
     Args:
         path (str):     location of the h5 file to be added to the PreprocessedMouseData table.
@@ -280,7 +280,7 @@ def add_h5_to_preprocessed_table(path, keys, comments, ignore_all_behaviors=True
             print(datafile, fid['images'].shape)
 
     for datafile in datasets:
-        FileTreeDataset.initialize_from(datafile, ignore_all_behaviors=ignore_all_behaviors)
+        FileTreeDataset.initialize_from(datafile, include_behavior=include_behavior)
 
     for key in (experiment.Scan() & keys).fetch('KEY'):
         filename = (template + '/').format(**key)
