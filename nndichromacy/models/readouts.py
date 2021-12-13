@@ -16,6 +16,7 @@ from torch import nn
 from neuralpredictors.constraints import positive
 from .utility import cart2pol_torch
 
+
 class MultiplePointPooled2d(torch.nn.ModuleDict):
     def __init__(
         self,
@@ -202,7 +203,7 @@ class MultipleFullGaussian2d(MultiReadout, torch.nn.ModuleDict):
                     source_grid=source_grid,
                 ),
             )
-            
+
         self.gamma_readout = gamma_readout
 
 
@@ -484,26 +485,31 @@ class MultipleFullGaussian2dBehav(MultiReadout, torch.nn.ModuleDict):
 
 
 class CenterSurround2d(nn.Module):
-
     def __init__(
-            self,
-            in_shape,
-            outdims,
-            bias,
-            init_mu_range=0.1,
-            init_center_var=.02,
-            init_surround_var=.02,
-            init_surround_radius=.45,
-            center_on=True,
-            surround_on=True,
+        self,
+        in_shape,
+        outdims,
+        bias,
+        init_mu_range=0.1,
+        init_center_var=0.02,
+        init_surround_var=0.02,
+        init_surround_radius=0.45,
+        center_on=True,
+        surround_on=True,
     ):
 
         super().__init__()
 
         # make sure the inputs are withing the proper range
-        if init_mu_range > 1.0 or init_mu_range <= 0.0 or init_center_var <= 0.0 or init_surround_var <= 0.0:
-            raise ValueError("either init_mu_range doesn't belong to [0.0, 1.0] or init_var is non-positive")
-
+        if (
+            init_mu_range > 1.0
+            or init_mu_range <= 0.0
+            or init_center_var <= 0.0
+            or init_surround_var <= 0.0
+        ):
+            raise ValueError(
+                "either init_mu_range doesn't belong to [0.0, 1.0] or init_var is non-positive"
+            )
 
         self.in_shape = in_shape
         c, w, h = in_shape
@@ -534,7 +540,6 @@ class CenterSurround2d(nn.Module):
         self.grid = nn.Parameter(data=self.make_mask_grid(), requires_grad=False)
         self.bias = nn.Parameter(torch.Tensor(outdims))
 
-
         self.initialize()
         self.record_initial_values()
 
@@ -543,12 +548,12 @@ class CenterSurround2d(nn.Module):
         self._mu.data.uniform_(-self.init_mu_range, self.init_mu_range)
 
         self._center_var.data.fill_(self.init_center_var)
-        self._center_weights.data.fill_(1.)
+        self._center_weights.data.fill_(1.0)  # center weights are initialized to 1.
         self._center_feature_weights.data.fill_(1 / self.in_shape[0])
 
         self._surround_var.data.fill_(self.init_surround_var)
         self._surround_radius.data.fill_(self.init_surround_radius)
-        self._surround_weights.data.fill_(0.)
+        self._surround_weights.data.fill_(0.0)  # surround weights initialzied to 0.
         self._surround_feature_weights.data.fill_(1 / self.in_shape[0])
 
         if self.bias is None:
@@ -579,18 +584,23 @@ class CenterSurround2d(nn.Module):
 
     @property
     def center_var(self):
-        self._center_var.data.clamp_(1e-3, .05)
+        self._center_var.data.clamp_(1e-3, 0.05)
         return self._center_var
 
     @property
     def surround_var(self):
-        self._surround_var.data.clamp_(1e-3, .03)
+        self._surround_var.data.clamp_(1e-3, 0.03)
         return self._surround_var
 
     @property
     def surround_radius(self):
-        surround_radius = torch.max(self._surround_radius, (3 * self.center_var.sqrt()/2 + 3 * self.surround_var.sqrt()/2).data)
-        surround_radius = torch.min(surround_radius, 1. - 3 * self.surround_var.sqrt()/2)
+        surround_radius = torch.max(
+            self._surround_radius,
+            (3 * self.center_var.sqrt() / 2 + 3 * self.surround_var.sqrt() / 2).data,
+        )
+        surround_radius = torch.min(
+            surround_radius, 1.0 - 3 * self.surround_var.sqrt() / 2
+        )
         return surround_radius
 
     @property
@@ -605,13 +615,17 @@ class CenterSurround2d(nn.Module):
     def center_feature_weights(self):
         # make the feature weights for each neuron positive and unit length
         positive(self._center_feature_weights)
-        return self._center_feature_weights / torch.norm(self._center_feature_weights, p=2, dim=0, keepdim=True)
+        return self._center_feature_weights / torch.norm(
+            self._center_feature_weights, p=2, dim=0, keepdim=True
+        )
 
     @property
     def surround_feature_weights(self):
         # make the feature weights for each neuron positive and unit length
         positive(self._surround_feature_weights)
-        return self._surround_feature_weights / torch.norm(self._surround_feature_weights, p=2, dim=0, keepdim=True)
+        return self._surround_feature_weights / torch.norm(
+            self._surround_feature_weights, p=2, dim=0, keepdim=True
+        )
 
     def mask(self, shift=None):
 
@@ -631,9 +645,11 @@ class CenterSurround2d(nn.Module):
 
         # surround mask
         surround_variances = self.surround_var.view(-1, 1, 1)
-        rho, phi = cart2pol_torch((self.grid - mean)[:, :, :, 0], (self.grid - mean)[:, :, :, 1])
+        rho, phi = cart2pol_torch(
+            (self.grid - mean)[:, :, :, 0], (self.grid - mean)[:, :, :, 1]
+        )
         radius = self.surround_radius.view(-1, 1, 1)
-        surround_pdf = torch.exp(-.5 * (rho - radius) ** 2 / surround_variances)
+        surround_pdf = torch.exp(-0.5 * (rho - radius) ** 2 / surround_variances)
         # normalize to sum=1
         surround_pdf = surround_pdf / torch.sum(surround_pdf, dim=(1, 2), keepdim=True)
 
@@ -642,12 +658,15 @@ class CenterSurround2d(nn.Module):
 
         return {"center": center_mask, "surround": surround_mask}
 
+    def forward(
+        self, center_features, surround_features, data_key=None, shift=None, **kwargs
+    ):
+        Nc, cc, hc, wc = center_features.size()
+        Ns, cs, hs, ws = surround_features.size()
 
-    def forward(self, center_features, surround_features, data_key=None, shift=None, **kwargs):
-        Nc, cc, wc, hc = center_features.size()
-        Ns, cs, ws, hs = surround_features.size()
-
-        assert Nc == Ns, "batch size should be the same for center and surround features"
+        assert (
+            Nc == Ns
+        ), "batch size should be the same for center and surround features"
 
         center_feature_weights = self.center_feature_weights
         surround_feature_weights = self.surround_feature_weights
@@ -657,21 +676,35 @@ class CenterSurround2d(nn.Module):
         surround_mask = mask["surround"]
 
         if self.center_on and self.surround_on:
-            center_y = torch.einsum("bcij,nij,cn->bn", center_features, center_mask, center_feature_weights)
+            center_y = torch.einsum(
+                "bcij,nij,cn->bn", center_features, center_mask, center_feature_weights
+            )
             if self.detach_center:
                 center_y = center_y.detach()
 
-            surround_y = torch.einsum("bcij,nij,cn->bn", surround_features, surround_mask, surround_feature_weights)
+            surround_y = torch.einsum(
+                "bcij,nij,cn->bn",
+                surround_features,
+                surround_mask,
+                surround_feature_weights,
+            )
             y = center_y + surround_y
 
         elif self.center_on and not self.surround_on:
-            center_y = torch.einsum("bcij,nij,cn->bn", center_features, center_mask, center_feature_weights)
+            center_y = torch.einsum(
+                "bcij,nij,cn->bn", center_features, center_mask, center_feature_weights
+            )
             if self.detach_center:
                 center_y = center_y.detach()
             y = center_y
 
         elif not self.center_on and self.surround_on:
-            surround_y = torch.einsum("bcij,nij,cn->bn", surround_features, surround_mask, surround_feature_weights)
+            surround_y = torch.einsum(
+                "bcij,nij,cn->bn",
+                surround_features,
+                surround_mask,
+                surround_feature_weights,
+            )
             y = surround_y
 
         return y + self.bias
@@ -682,30 +715,36 @@ class CenterSurround2d(nn.Module):
         Args:
             average(bool): if True, use mean of weights for regularization
         """
-        raise NotImplementedError("self.features do not exist")
-        #if average:
-        #    return self.features.abs().mean()
-        #else:
-        #    return self.features.abs().sum()
+
+        if average:
+            return (
+                self.center_feature_weights.abs().mean()
+                + self.surround_feature_weights.abs().mean()
+            )
+        else:
+            return (
+                self.center_feature_weights.abs().sum()
+                + self.surround_feature_weights.abs().sum()
+            )
 
     def regularizer(self, data_key=None):
-        return 0.
+        return self.feature_l1(average=False)
 
 
 class MultipleCenterSurround(MultiReadout, torch.nn.ModuleDict):
     def __init__(
-            self,
-            core,
-            in_shape_dict,
-            n_neurons_dict,
-            gamma_readout,
-            bias,
-            init_mu_range=0.1,
-            init_center_var=.02,
-            init_surround_var=.02,
-            init_surround_radius=.45,
-            center_on=True,
-            surround_on=True,
+        self,
+        core,
+        in_shape_dict,
+        n_neurons_dict,
+        gamma_readout,
+        bias,
+        init_mu_range=0.1,
+        init_center_var=0.02,
+        init_surround_var=0.02,
+        init_surround_radius=0.45,
+        center_on=True,
+        surround_on=True,
     ):
         # super init to get the _module attribute
         super().__init__()
@@ -732,4 +771,4 @@ class MultipleCenterSurround(MultiReadout, torch.nn.ModuleDict):
         self.gamma_readout = gamma_readout
 
     def regularizer(self, data_key):
-        return self[data_key].regularizer()
+        return self[data_key].regularizer() * self.gamma_readout

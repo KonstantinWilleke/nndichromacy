@@ -13,7 +13,7 @@ RUN git config --global credential.helper store &&\
     echo https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com >> ~/.git-credentials
 RUN git clone -b transformer_readout https://github.com/KonstantinWilleke/neuralpredictors &&\
     git clone https://github.com/sinzlab/nnfabrik &&\
-    git clone -b transparency_mei https://github.com/KonstantinWilleke/mei &&\
+    # git clone -b transparency_mei https://github.com/KonstantinWilleke/mei &&\
     git clone https://github.com/sinzlab/data_port &&\
     git clone https://github.com/sinzlab/nexport.git
 
@@ -24,7 +24,7 @@ ADD . /src/nndichromacy
 RUN pip install -e /src/neuralpredictors &&\
     pip install -e /src/nnfabrik &&\
     pip install -e /src/nndichromacy &&\
-    pip install -e /src/mei &&\
+    # pip install -e /src/mei &&\
     pip install -e /src/data_port &&\
     pip install -e /src/nexport
 
