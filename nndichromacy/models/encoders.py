@@ -2,29 +2,63 @@ import numpy as np
 import torch
 import copy
 
-from neuralpredictors.layers.cores import Stacked2dCore, RotationEquivariant2dCore
-from neuralpredictors.layers.legacy import Gaussian2d
-from neuralpredictors.layers.readouts import PointPooled2d
-from nnfabrik.utility.nn_helpers import get_module_output, set_random_seed, get_dims_for_loader_dict
 from torch import nn
 from torch.nn import functional as F
-
-from .cores import SE2dCore, TransferLearningCore
-from .readouts import MultipleFullGaussian2d, MultiReadout, MultipleSpatialXFeatureLinear
-from .utility import unpack_data_info
-from .utility import *
-from .shifters import MLPShifter, StaticAffine2dShifter
-
+from .readouts import MultipleCenterSurround
 
 class Encoder(nn.Module):
 
-    def __init__(self, core, readout, elu_offset, shifter=None):
+    def __init__(self, core, readout, elu_offset, linear, 
+                    final_nonlinear_for_linear,
+                    n_neurons_dict,shifter=None):
         super().__init__()
         self.core = core
         self.readout = readout
         self.offset = elu_offset
         self.shifter = shifter
+        self.linear = linear # True or False
+        self.final_nonlinear_for_linear=final_nonlinear_for_linear
+        self.n_neurons_dict = n_neurons_dict
+        for session in n_neurons_dict:
+            outdim=n_neurons_dict[session]
+        self.n_neurons=outdim
 
+        ### when share a and b for the whole output, initialization largely influence the model convergence
+        '''if self.linear == True:
+            if final_nonlinear_for_linear is not None:
+                self.a1=nn.Parameter(torch.Tensor([0.12]))
+                self.register_parameter("a1", self.a1)
+
+                self.b1=nn.Parameter(torch.Tensor([-0.5]))
+                self.register_parameter("b1", self.b1)
+
+                self.a2=nn.Parameter(torch.Tensor([-1.2]))
+                self.register_parameter("a2", self.a2)
+
+                self.b2=nn.Parameter(torch.Tensor([0.8]))
+                self.register_parameter("b2", self.b2)'''
+
+        if self.linear == True:
+            if self.final_nonlinear_for_linear is not None:
+                if self.final_nonlinear_for_linear >1:
+                    self.a1=nn.Parameter(torch.rand(self.n_neurons))
+                    self.register_parameter("a1", self.a1)
+
+                    self.b1=nn.Parameter(torch.rand(self.n_neurons))
+                    self.register_parameter("b1", self.b1)
+
+                    self.a2=nn.Parameter(torch.rand(self.n_neurons))
+                    self.register_parameter("a2", self.a2)
+
+                    self.b2=nn.Parameter(torch.rand(self.n_neurons))
+                    self.register_parameter("b2", self.b2)
+
+                    if self.final_nonlinear_for_linear>2:
+                        self.a3=nn.Parameter(torch.rand(self.n_neurons))
+                        self.register_parameter("a3", self.a3)
+
+                        self.b3=nn.Parameter(torch.rand(self.n_neurons))
+                        self.register_parameter("b3", self.b3)
 
     def forward(self, *args, data_key=None, eye_pos=None, shift=None, trial_idx=None, **kwargs):
 
@@ -49,20 +83,28 @@ class Encoder(nn.Module):
                 eye_pos = torch.tensor(eye_pos)
             eye_pos = eye_pos.to(x.device).to(dtype=x.dtype)
 
+            #import ipdb; ipdb.set_trace()
             if trial_idx is not None:
                 if not isinstance(trial_idx, torch.Tensor):
                     trial_idx = torch.tensor(trial_idx)
                 trial_idx = trial_idx.to(x.device).to(dtype=x.dtype)
 
+                #ipdb.set_trace()
                 if self.shifter[data_key].mlp[0].in_features == 3:
                     eye_pos = torch.cat((eye_pos, trial_idx), dim=1)
 
             shift = self.shifter[data_key](eye_pos)
 
-        if "sample" in kwargs:
-            x = self.readout(x, data_key=data_key, sample=kwargs["sample"], shift=shift)
-        else:
-            x = self.readout(x, data_key=data_key, shift=shift)
+        x = self.readout(x, data_key=data_key, shift=shift, **kwargs)
+         
+        if self.linear==True:
+            if self.final_nonlinear_for_linear is not None:
+                if self.final_nonlinear_for_linear>1:
+                    x = F.elu(x*self.a1+self.b1)
+                    x=x*self.a2+self.b2
+                    if self.final_nonlinear_for_linear>2:
+                        x = F.elu(x)
+                        x = x*self.a3+self.b3
 
         return F.elu(x + self.offset) + 1
 
@@ -95,6 +137,63 @@ class EncoderShifter(nn.Module):
 
         sample = kwargs["sample"] if 'sample' in kwargs else None
         x = self.readout(x, data_key=data_key, sample=sample)
+        return F.elu(x + self.offset) + 1
+
+    def regularizer(self, data_key):
+        return self.core.regularizer() + self.readout.regularizer(data_key=data_key)
+
+
+class GeneralEncoder(nn.Module):
+
+    def __init__(self, core, readout, elu_offset, shifter=None):
+        super().__init__()
+        self.core = core
+        self.readout = readout
+        self.offset = elu_offset
+        self.shifter = shifter
+
+    def forward(self, *args, data_key=None, **kwargs):
+        x = self.core(args[0])
+
+        trial_idx = kwargs.get("trial_idx", None)
+        pupil_center = kwargs.get("pupil_center", None)
+        eye_pos = kwargs.get("eye_pos", None)
+
+        behavior = kwargs.pop("behavior", None)
+        if behavior is not None:
+            if not isinstance(behavior, torch.Tensor):
+                behavior = torch.tensor(behavior)
+            behavior = behavior.to(x.device).to(dtype=x.dtype)
+
+        if eye_pos is not None and self.shifter is not None:
+            if not isinstance(eye_pos, torch.Tensor):
+                eye_pos = torch.tensor(eye_pos)
+
+            # overwrite pupil_center
+            pupil_center = eye_pos.to(x.device).to(dtype=x.dtype)
+
+        shift = kwargs.get("shift", None)
+
+
+        if pupil_center is not None and self.shifter is not None:
+            if not isinstance(pupil_center, torch.Tensor):
+                pupil_center = torch.tensor(pupil_center)
+            pupil_center = pupil_center.to(x.device).to(dtype=x.dtype)
+            if trial_idx is not None:
+                if not isinstance(trial_idx, torch.Tensor):
+                    trial_idx = torch.tensor(trial_idx)
+                trial_idx = trial_idx.to(x.device).to(dtype=x.dtype)
+
+                if self.shifter[data_key].mlp[0].in_features == 3:
+                    pupil_center = torch.cat((pupil_center, trial_idx), dim=1)
+
+            shift = self.shifter[data_key](pupil_center)
+
+        if isinstance(self.readout, MultipleCenterSurround):
+            x = self.readout(x, x, data_key=data_key, shift=shift, **kwargs)
+        else:
+            x = self.readout(x, data_key=data_key, shift=shift, behavior=behavior, **kwargs)
+
         return F.elu(x + self.offset) + 1
 
     def regularizer(self, data_key):
