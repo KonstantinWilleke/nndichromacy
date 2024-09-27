@@ -144,7 +144,7 @@ def static_loader(
     if return_test_sampler:
         shuffle_behavior=False
     if file_tree:
-        dat = FileTreeDataset(path, *data_keys, shuffle_behavior=shuffle_behavior)
+        dat = FileTreeDataset(path, *data_keys)#, shuffle_behavior=shuffle_behavior)
     else:
         dat = StaticImageSet(path, *data_keys)
 
@@ -251,6 +251,7 @@ def static_loader(
     elif "frame_image_id" in dir(dat_info):
         frame_image_id = dat_info.frame_image_id
         image_class = dat_info.frame_image_class
+
     elif "frame2_image_id" in dir(dat_info):
         frame_image_id = dat_info.frame2_image_id
         image_class = dat_info.frame2_image_class
